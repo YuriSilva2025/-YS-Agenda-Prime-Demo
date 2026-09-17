@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Calendar, money } from "@/lib/api";
 import { earnings, receiptDate } from "@/lib/earnings";
-import { demoMonths } from "@/lib/demo";
+import { DEMO_TODAY, demoMonths } from "@/lib/demo";
 
 type PeriodItem = {
   label: string;
@@ -213,6 +213,12 @@ export default function Earnings({
 
   const currentMonth = monthlyItems[monthlyItems.length - 1];
   const currentWeek = weeklyItems[weeklyItems.length - 1];
+  const dayKey = demo ? DEMO_TODAY : today;
+  const dayReceipts = data.appointments.filter((appointment) => appointment.payment && receiptDate(appointment.payment.receivedAt) === dayKey);
+  const currentDay = {
+    total: Math.round(dayReceipts.reduce((sum, appointment) => sum + appointment.payment!.amount * 100, 0)) / 100,
+    count: dayReceipts.length,
+  };
 
   const receipts = data.appointments
     .filter((appointment) => appointment.payment)
@@ -247,15 +253,9 @@ export default function Earnings({
         </article>
 
         <article>
-          <span>Ticket médio neste mês</span>
-          <strong>
-            {money(
-              currentMonth?.count
-                ? currentMonth.total / currentMonth.count
-                : 0,
-            )}
-          </strong>
-          <small>Por atendimento recebido</small>
+          <span>Recebido hoje</span>
+          <strong>{money(currentDay.total)}</strong>
+          <small>{currentDay.count} recebimento{currentDay.count === 1 ? '' : 's'}</small>
         </article>
       </div>
 
