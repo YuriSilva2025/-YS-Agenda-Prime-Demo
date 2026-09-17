@@ -73,6 +73,13 @@ export default function Admin() {
     setEditing(null);
   }
 
+  function deleteService(service: Service) {
+    if (!data) return;
+    if (!window.confirm(`Excluir "${service.name}"? Os atendimentos já registrados continuarão intactos.`)) return;
+    persist({ ...data, services: data.services.filter(item => item.id !== service.id) }, 'Serviço excluído da demonstração. Atendimentos anteriores foram preservados.');
+    setEditing(null);
+  }
+
   function saveSettings() {
     if (!data || !settings) return;
     persist({ ...data, settings }, 'Disponibilidade salva na demonstração.');
@@ -160,7 +167,7 @@ export default function Admin() {
                 <label className="checkbox"><input type="checkbox" checked={editing.active} onChange={e => setEditing({ ...editing, active: e.target.checked })} />Disponível para novos agendamentos</label>
                 <div className="form-row"><button className="primary">Salvar serviço</button><button type="button" className="text-button" onClick={() => setEditing(null)}>Voltar</button></div>
               </form>}
-              <div className="admin-services">{data.services.map(s => <article className="appointment" key={s.id}><div><h3>{s.name}</h3><p>{s.description}<br />{s.minutes} minutos · {s.active ? 'Ativo' : 'Pausado'}</p></div><strong>{money(s.price)}</strong><button className="text-button" onClick={() => setEditing({ ...s })}>Editar</button></article>)}</div>
+              <div className="admin-services">{data.services.map(s => <article className="appointment" key={s.id}><div><h3>{s.name}</h3><p>{s.description}<br />{s.minutes} minutos · {s.active ? 'Ativo' : 'Pausado'}</p></div><strong>{money(s.price)}</strong><button className="text-button" onClick={() => setEditing({ ...s })}>Editar</button><button className="text-button" onClick={() => deleteService(s)}>Excluir</button></article>)}</div>
             </>}
 
             {tab === 'disponibilidade' && settings && <>
