@@ -1,4 +1,5 @@
 "use client";
+import { useState } from 'react';
 import { Calendar, money } from '@/lib/api';
 import { demoMonths } from '@/lib/demo';
 
@@ -95,6 +96,247 @@ export function Dashboard({ data, today, onAgenda, demo = false }: { data: Calen
           <div><span>Próximos</span><strong>{next.length}</strong></div>
         </div>
       </section>
+    </section>;
+}
+
+
+type AgendaMode = 'day' | 'week' | 'month';
+
+const addDays = (date: string, amount: number) => {
+    const current = parse(date);
+    current.setDate(current.getDate() + amount);
+    return key(current);
+};
+
+const minutesFromTime = (time: string) => {
+    const [hour, minute] = time.split(':').map(Number);
+    return hour * 60 + minute;
+};
+
+const compactHours = (minutes: number) => {
+    const safe = Math.max(0, minutes);
+    if (safe === 0) return '0h';
+    const hours = safe / 60;
+    return hours % 1 === 0 ? `${hours.toFixed(0)}h` : `${hours.toFixed(1).replace('.', ',')}h`;
+};
+
+export function AgendaWorkspace({
+    data,
+    date,
+    onSelect,
+    onAddExtra,
+    onTogglePayment,
+    onCancel,
+    onCreate,
+}: {
+    data: Calendar;
+    date: string;
+    onSelect: (date: string) => void;
+    onAddExtra: (id: string) => void;
+    onTogglePayment: (id: string) => void;
+    onCancel: (id: string) => void;
+    onCreate: (input: { name: string; phone: string; time: string; serviceId: string }) => void;
+}) {
+    const [mode, setMode] = useState<AgendaMode>('day');
+    const [selected, setSelected] = useState<string | null>(null);
+    const [creating, setCreating] = useState(false);
+
+    const allDayAppointments = data.appointments
+        .filter(a => a.date === date)
+        .sort((a, b) => a.time.localeCompare(b.time));
+    const confirmed = allDayAppointments.filter(a => a.status === 'confirmed');
+    const forecast = confirmed.reduce((sum, appointment) => sum + appointment.price, 0);
+    const received = confirmed.reduce((sum, appointment) => sum + (appointment.payment?.amount ?? 0), 0);
+    const workMinutes = data.settings.periods.reduce((sum, period) => sum + Math.max(0, period.end - period.start), 0);
+    const bookedMinutes = confirmed.reduce((sum, appointment) => sum + appointment.minutes, 0);
+    const blockedMinutes = data.blocks
+        .filter(block => block.date === date)
+        .reduce((total, block) => total + data.settings.periods.reduce((sum, period) => {
+            const overlap = Math.max(0, Math.min(block.end, period.end) - Math.max(block.start, period.start));
+            return sum + overlap;
+        }, 0), 0);
+    const availableMinutes = Math.max(0, workMinutes - bookedMinutes - blockedMinutes);
+
+    const day = parse(date);
+    const step = mode === 'week' ? 7 : 1;
+    const longDate = day.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
+    const nextAppointment = confirmed.find(a => a.time >= new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'America/Sao_Paulo',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).format(new Date())) ?? confirmed[0];
+
+    const periods = [...data.settings.periods].sort((a, b) => a.start - b.start);
+    const startMinute = periods.length ? periods[0].start : 8 * 60;
+    const endMinute = periods.length ? periods[periods.length - 1].end : 19 * 60;
+    const pxPerMinute = 1.18;
+    const timelineHeight = Math.max(520, (endMinute - startMinute) * pxPerMinute);
+    const hourMarks = Array.from(
+        { length: Math.floor((endMinute - startMinute) / 60) + 1 },
+        (_, index) => startMinute + index * 60,
+    );
+    const halfHourMarks = Array.from(
+        { length: Math.floor((endMinute - startMinute) / 30) + 1 },
+        (_, index) => startMinute + index * 30,
+    );
+
+    const automaticGaps = periods.slice(0, -1).map((period, index) => ({
+        id: `period-gap-${index}`,
+        start: period.end,
+        end: periods[index + 1].start,
+        label: 'Intervalo',
+    })).filter(gap => gap.end > gap.start);
+
+    const blocks = [
+        ...automaticGaps,
+        ...data.blocks.filter(block => block.date === date).map(block => ({ ...block, label: 'Horário bloqueado' })),
+    ];
+
+    const weekStart = parse(date);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    const weekDays = Array.from({ length: 7 }, (_, index) => {
+        const current = new Date(weekStart);
+        current.setDate(weekStart.getDate() + index);
+        const value = key(current);
+        const appointments = data.appointments.filter(a => a.date === value && a.status === 'confirmed');
+        return {
+            value,
+            current,
+            appointments,
+            total: appointments.reduce((sum, appointment) => sum + appointment.price, 0),
+        };
+    });
+
+    function submitNewAppointment(form: HTMLFormElement) {
+        const formData = new FormData(form);
+        onCreate({
+            name: String(formData.get('name') || '').trim(),
+            phone: String(formData.get('phone') || '').trim(),
+            time: String(formData.get('time') || ''),
+            serviceId: String(formData.get('serviceId') || ''),
+        });
+        form.reset();
+        setCreating(false);
+    }
+
+    return <section className="agenda-pro">
+        <div className="agenda-summary">
+            <article>
+                <span className="agenda-summary-icon">◫</span>
+                <div><span>Agendamentos hoje</span><strong>{confirmed.length}</strong><small>Compromissos ativos do dia</small></div>
+            </article>
+            <article>
+                <span className="agenda-summary-icon">↗</span>
+                <div><span>Receita prevista hoje</span><strong>{money(forecast)}</strong><small>{received ? `${money(received)} já recebido` : 'Previsão do dia'}</small></div>
+            </article>
+            <article>
+                <span className="agenda-summary-icon">◷</span>
+                <div><span>Horários disponíveis</span><strong>{compactHours(availableMinutes)}</strong><small>Livres hoje</small></div>
+            </article>
+        </div>
+
+        <section className="agenda-insight">
+            <span className="agenda-insight-icon">✦</span>
+            <div>
+                <strong>Painel inteligente</strong>
+                <p>{nextAppointment
+                    ? <>Próximo atendimento: <b>{nextAppointment.time}</b> · {nextAppointment.name} · {nextAppointment.service}.</>
+                    : <>Nenhum atendimento confirmado para esta data. Há <b>{compactHours(availableMinutes)}</b> livres no expediente.</>}</p>
+            </div>
+        </section>
+
+        <div className="agenda-view-tabs" role="tablist" aria-label="Visualização da agenda">
+            {([
+                ['day', 'Dia'],
+                ['week', 'Semana'],
+                ['month', 'Mês'],
+            ] as [AgendaMode, string][]).map(([id, label]) =>
+                <button key={id} type="button" className={mode === id ? 'is-active' : ''} onClick={() => setMode(id)} aria-selected={mode === id}>{label}</button>
+            )}
+        </div>
+
+        {mode !== 'month' && <div className="agenda-date-nav">
+            <button type="button" aria-label={mode === 'week' ? 'Semana anterior' : 'Dia anterior'} onClick={() => onSelect(addDays(date, -step))}>‹</button>
+            <button type="button" className="agenda-date-label" onClick={() => onSelect(date)}>{mode === 'week'
+                ? `${weekDays[0].current.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} — ${weekDays[6].current.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}`
+                : longDate}</button>
+            <button type="button" aria-label={mode === 'week' ? 'Próxima semana' : 'Próximo dia'} onClick={() => onSelect(addDays(date, step))}>›</button>
+        </div>}
+
+        {mode === 'day' && <div className="agenda-timeline-shell">
+            <div className="agenda-timeline" style={{ height: timelineHeight }}>
+                <div className="agenda-time-axis">
+                    {hourMarks.map(value => <span key={value} style={{ top: (value - startMinute) * pxPerMinute }}>{String(Math.floor(value / 60)).padStart(2, '0')}:00</span>)}
+                </div>
+                <div className="agenda-track">
+                    {halfHourMarks.map(value => <i key={value} className={value % 60 === 0 ? 'hour-line' : 'half-line'} style={{ top: (value - startMinute) * pxPerMinute }} />)}
+
+                    {blocks.map(block => <div
+                        className="agenda-block"
+                        key={block.id}
+                        style={{
+                            top: (block.start - startMinute) * pxPerMinute,
+                            height: Math.max(34, (block.end - block.start) * pxPerMinute - 4),
+                        }}
+                    >
+                        <strong>⊘ {block.label}</strong>
+                        <span>{String(Math.floor(block.start / 60)).padStart(2, '0')}:{String(block.start % 60).padStart(2, '0')} — {String(Math.floor(block.end / 60)).padStart(2, '0')}:{String(block.end % 60).padStart(2, '0')}</span>
+                    </div>)}
+
+                    {allDayAppointments.map(appointment => {
+                        const top = (minutesFromTime(appointment.time) - startMinute) * pxPerMinute;
+                        const isSelected = selected === appointment.id;
+                        return <article
+                            key={appointment.id}
+                            className={`agenda-event ${appointment.status === 'cancelled' ? 'is-cancelled' : ''} ${appointment.payment ? 'is-paid' : ''} ${isSelected ? 'is-selected' : ''}`}
+                            style={{ top, minHeight: Math.max(52, appointment.minutes * pxPerMinute - 5) }}
+                        >
+                            <button type="button" className="agenda-event-main" onClick={() => setSelected(isSelected ? null : appointment.id)}>
+                                <span className="agenda-event-copy">
+                                    <strong>{appointment.name}</strong>
+                                    <span>{appointment.service}</span>
+                                    <small>◷ {appointment.minutes} min &nbsp; · &nbsp; {money(appointment.price)} {appointment.source === 'walk-in' ? ' · Presencial' : ''}</small>
+                                </span>
+                                <span className={appointment.payment ? 'agenda-event-status paid' : appointment.status === 'cancelled' ? 'agenda-event-status cancelled' : 'agenda-event-status'}>
+                                    {appointment.payment ? 'Recebido' : appointment.status === 'cancelled' ? 'Cancelado' : 'Agendado'}
+                                </span>
+                            </button>
+                            {isSelected && appointment.status === 'confirmed' && <div className="agenda-event-actions">
+                                <button type="button" onClick={() => onAddExtra(appointment.id)}>+ Serviço extra</button>
+                                <button type="button" onClick={() => onTogglePayment(appointment.id)}>{appointment.payment ? 'Desfazer recebido' : 'Marcar recebido'}</button>
+                                <button type="button" onClick={() => { if (window.confirm(`Cancelar o atendimento de ${appointment.name}?`)) onCancel(appointment.id); }}>Cancelar</button>
+                            </div>}
+                        </article>;
+                    })}
+                </div>
+            </div>
+        </div>}
+
+        {mode === 'week' && <div className="agenda-week-grid">
+            {weekDays.map(item => <button type="button" key={item.value} className={item.value === date ? 'agenda-week-day is-selected' : 'agenda-week-day'} onClick={() => { onSelect(item.value); setMode('day'); }}>
+                <span>{item.current.toLocaleDateString('pt-BR', { weekday: 'short' })}</span>
+                <strong>{item.current.getDate()}</strong>
+                <small>{item.appointments.length} atendimento{item.appointments.length === 1 ? '' : 's'}</small>
+                <b>{money(item.total)}</b>
+                <i>{item.appointments.slice(0, 3).map(a => `${a.time} ${a.name.split(' ')[0]}`).join(' · ') || 'Livre'}</i>
+            </button>)}
+        </div>}
+
+        {mode === 'month' && <AdminCalendar data={data} date={date} onSelect={(value) => { onSelect(value); setMode('day'); }} />}
+
+        {creating && <form className="agenda-quick-form" onSubmit={event => { event.preventDefault(); submitNewAppointment(event.currentTarget); }}>
+            <div className="agenda-quick-head"><div><p className="eyebrow">NOVO ATENDIMENTO</p><h3>Adicionar à agenda</h3></div><button type="button" className="text-button" onClick={() => setCreating(false)}>Fechar</button></div>
+            <div className="agenda-quick-grid">
+                <label>Cliente<input name="name" required placeholder="Nome do cliente" /></label>
+                <label>WhatsApp<input name="phone" placeholder="(14) 99999-9999" /></label>
+                <label>Horário<input name="time" type="time" required /></label>
+                <label>Serviço<select name="serviceId" required defaultValue=""><option value="" disabled>Selecione</option>{data.services.filter(service => service.active).map(service => <option key={service.id} value={service.id}>{service.name} · {money(service.price)}</option>)}</select></label>
+            </div>
+            <button className="primary" type="submit">Adicionar atendimento</button>
+        </form>}
+
+        <button type="button" className="agenda-floating-add" aria-label="Adicionar novo atendimento" onClick={() => setCreating(value => !value)}>+</button>
     </section>;
 }
 
