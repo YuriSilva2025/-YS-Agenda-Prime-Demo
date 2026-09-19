@@ -1,5 +1,5 @@
 "use client";
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Calendar, money } from '@/lib/api';
 import { demoMonths } from '@/lib/demo';
 
@@ -128,6 +128,7 @@ export function AgendaWorkspace({
     onTogglePayment,
     onCancel,
     onCreate,
+    onMove,
 }: {
     data: Calendar;
     date: string;
@@ -136,10 +137,23 @@ export function AgendaWorkspace({
     onTogglePayment: (id: string) => void;
     onCancel: (id: string) => void;
     onCreate: (input: { name: string; phone: string; time: string; serviceId: string }) => void;
+    onMove: (id: string, time: string) => void;
 }) {
     const [mode, setMode] = useState<AgendaMode>('day');
     const [selected, setSelected] = useState<string | null>(null);
     const [creating, setCreating] = useState(false);
+    const [dragging, setDragging] = useState<{ id: string; minute: number; valid: boolean; reason: string } | null>(null);
+    const [dragFeedback, setDragFeedback] = useState('');
+    const trackRef = useRef<HTMLDivElement | null>(null);
+    const dragRef = useRef<{
+        id: string;
+        pointerId: number;
+        startY: number;
+        offsetY: number;
+        originalMinute: number;
+        active: boolean;
+        holdTimer: number | null;
+    } | null>(null);
 
     const allDayAppointments = data.appointments
         .filter(a => a.date === date)
@@ -208,6 +222,138 @@ export function AgendaWorkspace({
         };
     });
 
+
+    const timeFromMinute = (value: number) =>
+        `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+
+    function validateMove(id: string, start: number) {
+        const appointment = data.appointments.find(item => item.id === id);
+        if (!appointment) return { valid: false, reason: 'Agendamento não encontrado.' };
+
+        const end = start + appointment.minutes;
+        const insideWorkPeriod = data.settings.periods.some(period => start >= period.start && end <= period.end);
+        if (!insideWorkPeriod) return { valid: false, reason: 'Esse horário fica fora do expediente ou dentro de um intervalo.' };
+
+        const blocked = data.blocks
+            .filter(block => block.date === date)
+            .some(block => start < block.end && end > block.start);
+        if (blocked) return { valid: false, reason: 'Esse horário está bloqueado.' };
+
+        const overlapsAppointment = data.appointments
+            .filter(item => item.id !== id && item.date === date && item.status === 'confirmed')
+            .some(item => {
+                const itemStart = minutesFromTime(item.time);
+                const itemEnd = itemStart + item.minutes;
+                return start < itemEnd && end > itemStart;
+            });
+        if (overlapsAppointment) return { valid: false, reason: 'Já existe outro atendimento nesse horário.' };
+
+        return { valid: true, reason: '' };
+    }
+
+    function minuteFromPointer(clientY: number, appointmentId: string, offsetY: number) {
+        const track = trackRef.current;
+        const appointment = data.appointments.find(item => item.id === appointmentId);
+        if (!track || !appointment) return startMinute;
+
+        const rect = track.getBoundingClientRect();
+        const raw = startMinute + (clientY - rect.top - offsetY) / pxPerMinute;
+        const snapped = Math.round(raw / 30) * 30;
+        return Math.max(startMinute, Math.min(endMinute - appointment.minutes, snapped));
+    }
+
+    function activateDrag(id: string, minute: number) {
+        if (!dragRef.current || dragRef.current.id !== id) return;
+        dragRef.current.active = true;
+        const validation = validateMove(id, minute);
+        setSelected(null);
+        setDragFeedback('Arraste e solte no novo horário.');
+        setDragging({ id, minute, ...validation });
+    }
+
+    function handleDragPointerDown(event: React.PointerEvent<HTMLElement>, id: string) {
+        const appointment = data.appointments.find(item => item.id === id);
+        const track = trackRef.current;
+        if (!appointment || !track || appointment.status !== 'confirmed') return;
+
+        event.stopPropagation();
+        const originalMinute = minutesFromTime(appointment.time);
+        const trackRect = track.getBoundingClientRect();
+        const eventTop = (originalMinute - startMinute) * pxPerMinute;
+        const offsetY = Math.max(0, Math.min(appointment.minutes * pxPerMinute, event.clientY - trackRect.top - eventTop));
+
+        const state = {
+            id,
+            pointerId: event.pointerId,
+            startY: event.clientY,
+            offsetY,
+            originalMinute,
+            active: false,
+            holdTimer: null as number | null,
+        };
+
+        dragRef.current = state;
+        event.currentTarget.setPointerCapture(event.pointerId);
+
+        if (event.pointerType === 'touch') {
+            state.holdTimer = window.setTimeout(() => activateDrag(id, originalMinute), 320);
+        }
+    }
+
+    function handleDragPointerMove(event: React.PointerEvent<HTMLElement>) {
+        const current = dragRef.current;
+        if (!current || current.pointerId !== event.pointerId) return;
+
+        if (!current.active && event.pointerType !== 'touch' && Math.abs(event.clientY - current.startY) > 5) {
+            activateDrag(current.id, current.originalMinute);
+        }
+
+        if (!dragRef.current?.active) return;
+        event.preventDefault();
+
+        const minute = minuteFromPointer(event.clientY, current.id, current.offsetY);
+        const validation = validateMove(current.id, minute);
+        setDragging({ id: current.id, minute, ...validation });
+        setDragFeedback(validation.valid ? `Soltar em ${timeFromMinute(minute)}` : validation.reason);
+    }
+
+    function finishDrag(event: React.PointerEvent<HTMLElement>) {
+        const current = dragRef.current;
+        if (!current || current.pointerId !== event.pointerId) return;
+
+        if (current.holdTimer !== null) window.clearTimeout(current.holdTimer);
+
+        const preview = dragging;
+        if (current.active && preview?.id === current.id) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (preview.valid && preview.minute !== current.originalMinute) {
+                onMove(current.id, timeFromMinute(preview.minute));
+                setDragFeedback(`Atendimento movido para ${timeFromMinute(preview.minute)}.`);
+            } else if (!preview.valid) {
+                setDragFeedback(preview.reason);
+            } else {
+                setDragFeedback('Horário mantido.');
+            }
+        }
+
+        try {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        } catch {}
+        dragRef.current = null;
+        setDragging(null);
+    }
+
+    function cancelDrag(event: React.PointerEvent<HTMLElement>) {
+        const current = dragRef.current;
+        if (current?.holdTimer !== null && current?.holdTimer !== undefined) window.clearTimeout(current.holdTimer);
+        try {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        } catch {}
+        dragRef.current = null;
+        setDragging(null);
+    }
+
     function submitNewAppointment(form: HTMLFormElement) {
         const formData = new FormData(form);
         onCreate({
@@ -264,12 +410,17 @@ export function AgendaWorkspace({
             <button type="button" aria-label={mode === 'week' ? 'Próxima semana' : 'Próximo dia'} onClick={() => onSelect(addDays(date, step))}>›</button>
         </div>}
 
+        {mode === 'day' && <div className={dragFeedback ? "agenda-drag-feedback is-visible" : "agenda-drag-feedback"}>
+            <span>↕</span>
+            <p>{dragFeedback || 'Segure o nome do cliente e arraste para mudar o horário.'}</p>
+        </div>}
+
         {mode === 'day' && <div className="agenda-timeline-shell">
             <div className="agenda-timeline" style={{ height: timelineHeight }}>
                 <div className="agenda-time-axis">
                     {hourMarks.map(value => <span key={value} style={{ top: (value - startMinute) * pxPerMinute }}>{String(Math.floor(value / 60)).padStart(2, '0')}:00</span>)}
                 </div>
-                <div className="agenda-track">
+                <div className={dragging ? "agenda-track is-dragging" : "agenda-track"} ref={trackRef}>
                     {halfHourMarks.map(value => <i key={value} className={value % 60 === 0 ? 'hour-line' : 'half-line'} style={{ top: (value - startMinute) * pxPerMinute }} />)}
 
                     {blocks.map(block => <div
@@ -284,6 +435,14 @@ export function AgendaWorkspace({
                         <span>{String(Math.floor(block.start / 60)).padStart(2, '0')}:{String(block.start % 60).padStart(2, '0')} — {String(Math.floor(block.end / 60)).padStart(2, '0')}:{String(block.end % 60).padStart(2, '0')}</span>
                     </div>)}
 
+                    {dragging && <div
+                        className={dragging.valid ? "agenda-drop-preview is-valid" : "agenda-drop-preview is-invalid"}
+                        style={{ top: (dragging.minute - startMinute) * pxPerMinute }}
+                    >
+                        <span>{timeFromMinute(dragging.minute)}</span>
+                        <strong>{dragging.valid ? 'Solte aqui' : 'Horário indisponível'}</strong>
+                    </div>}
+
                     {allDayAppointments.map(appointment => {
                         const top = (minutesFromTime(appointment.time) - startMinute) * pxPerMinute;
                         const isSelected = selected === appointment.id;
@@ -294,7 +453,14 @@ export function AgendaWorkspace({
                         >
                             <button type="button" className="agenda-event-main" onClick={() => setSelected(isSelected ? null : appointment.id)}>
                                 <span className="agenda-event-copy">
-                                    <strong>{appointment.name}</strong>
+                                    <strong
+                                        className="agenda-drag-name"
+                                        title={appointment.status === 'confirmed' ? 'Segure e arraste para mudar o horário' : undefined}
+                                        onPointerDown={event => handleDragPointerDown(event, appointment.id)}
+                                        onPointerMove={handleDragPointerMove}
+                                        onPointerUp={finishDrag}
+                                        onPointerCancel={cancelDrag}
+                                    ><span className="agenda-drag-grip" aria-hidden="true">⋮⋮</span>{appointment.name}</strong>
                                     <span>{appointment.service}</span>
                                     <small>◷ {appointment.minutes} min &nbsp; · &nbsp; {money(appointment.price)} {appointment.source === 'walk-in' ? ' · Presencial' : ''}</small>
                                 </span>
