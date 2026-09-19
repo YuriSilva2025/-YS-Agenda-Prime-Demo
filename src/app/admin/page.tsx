@@ -5,7 +5,7 @@ import Link from 'next/link';
 import BrandLogo from '@/components/brand-logo';
 import YsBrand from '@/components/ys-brand';
 import Earnings from '@/components/earnings';
-import AdminCalendar, { Dashboard } from '@/components/admin-calendar';
+import AdminCalendar, { AgendaWorkspace, Dashboard } from '@/components/admin-calendar';
 import { Calendar, Service, Settings, clock, money, minute } from '@/lib/api';
 import { DEMO_TODAY, demoClients, loadDemoCalendar, resetDemoCalendar, saveDemoCalendar } from '@/lib/demo';
 
@@ -18,7 +18,6 @@ export default function Admin() {
   const [editing, setEditing] = useState<Service | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [notice, setNotice] = useState('');
-  const [cancel, setCancel] = useState('');
   const [clients, setClients] = useState<DemoClient[]>(demoClients);
 
   useEffect(() => {
@@ -37,7 +36,6 @@ export default function Admin() {
   function cancelAppointment(id: string) {
     if (!data) return;
     persist({ ...data, appointments: data.appointments.map(a => a.id === id ? { ...a, status: 'cancelled' as const } : a) }, 'Agendamento cancelado na demonstração.');
-    setCancel('');
   }
 
   function togglePayment(id: string) {
@@ -108,7 +106,31 @@ export default function Admin() {
     setNotice('Cliente presencial adicionado à demonstração.');
   }
 
-  const appointments = data?.appointments.filter(a => a.date === date) ?? [];
+
+  function addManualAppointment(input: { name: string; phone: string; time: string; serviceId: string }) {
+    if (!data || !input.name || !input.time || !input.serviceId) return;
+    const service = data.services.find(item => item.id === input.serviceId);
+    if (!service) return;
+    const phone = input.phone.replace(/\D/g, '');
+    const appointment = {
+      id: crypto.randomUUID(),
+      userId: 'walk-in',
+      name: input.name,
+      phone: phone || 'Sem WhatsApp',
+      date,
+      time: input.time,
+      serviceId: service.id,
+      service: service.name,
+      items: [{ serviceId: service.id, name: service.name, price: service.price, minutes: service.minutes }],
+      price: service.price,
+      minutes: service.minutes,
+      status: 'confirmed' as const,
+      source: 'walk-in',
+      note: 'Atendimento incluído manualmente pela agenda',
+    };
+    persist({ ...data, appointments: [...data.appointments, appointment] }, 'Novo atendimento adicionado à agenda.');
+  }
+
 
   return (
     <main className="barber-space">
@@ -135,27 +157,18 @@ export default function Admin() {
           {!data ? <p role="status">Carregando demonstração…</p> : <>
             {tab === 'dashboard' && <Dashboard data={data} today={DEMO_TODAY} onAgenda={() => setTab('agenda')} demo />}
 
-            {(tab === 'agenda' || tab === 'disponibilidade') && <AdminCalendar data={data} date={date} onSelect={setDate} />}
-            {(tab === 'agenda' || tab === 'disponibilidade') && <label className="field">Data<input type="date" value={date} onChange={e => setDate(e.target.value)} /></label>}
+            {tab === 'disponibilidade' && <AdminCalendar data={data} date={date} onSelect={setDate} />}
+            {tab === 'disponibilidade' && <label className="field">Data<input type="date" value={date} onChange={e => setDate(e.target.value)} /></label>}
 
-            {tab === 'agenda' && <>
-              <div className="stats">
-                <article><span>Agendamentos confirmados</span><strong>{appointments.filter(a => a.status === 'confirmed').length}</strong></article>
-                <article><span>Valor previsto</span><strong>{money(appointments.filter(a => a.status === 'confirmed').reduce((n, a) => n + a.price, 0))}</strong></article>
-                <article><span>Recebido no dia</span><strong>{money(appointments.reduce((n, a) => n + (a.payment?.amount ?? 0), 0))}</strong></article>
-              </div>
-              <div className="section-heading"><h2>Atendimentos do dia</h2><span>Inclua adicionais durante o atendimento</span></div>
-              {!appointments.length ? <p className="muted">Nenhum agendamento nesta data.</p> : <div className="appointment-list">
-                {[...appointments].sort((a, b) => a.time.localeCompare(b.time)).map(a => <article className="appointment" key={a.id}>
-                  <strong className="appointment-time">{a.time}</strong>
-                  <div><h3>{a.name}</h3><p>{a.service} · {a.minutes} min · {money(a.price)}</p><span className="walkin-tag">{a.userId === 'walk-in' ? 'Presencial' : 'Online/demo'}</span></div>
-                  <span className={a.status === 'confirmed' ? 'status' : 'muted'}>{a.status === 'confirmed' ? 'Confirmado' : 'Cancelado'}</span>
-                  {a.status === 'confirmed' && <button className="text-button" onClick={() => addExtra(a.id)}>+ Adicional R$ 25</button>}
-                  {(a.status === 'confirmed' || a.payment) && <button className="text-button" onClick={() => togglePayment(a.id)}>{a.payment ? '✓ Recebido · desfazer' : 'Marcar como recebido'}</button>}
-                  {a.status === 'confirmed' && (cancel === a.id ? <div className="cancel-actions"><span>Cancelar?</span><button onClick={() => cancelAppointment(a.id)}>Sim</button><button onClick={() => setCancel('')}>Voltar</button></div> : <button className="text-button" onClick={() => setCancel(a.id)}>Cancelar</button>)}
-                </article>)}
-              </div>}
-            </>}
+            {tab === 'agenda' && <AgendaWorkspace
+              data={data}
+              date={date}
+              onSelect={setDate}
+              onAddExtra={addExtra}
+              onTogglePayment={togglePayment}
+              onCancel={cancelAppointment}
+              onCreate={addManualAppointment}
+            />}
 
             {tab === 'servicos' && <>
               <button className="primary" onClick={() => setEditing({ id: '', name: '', description: '', price: 0, minutes: 30, active: true })}>+ Novo serviço</button>
