@@ -107,6 +107,16 @@ export default function Admin() {
   }
 
 
+  function moveAppointment(id: string, time: string) {
+    if (!data) return;
+    const appointment = data.appointments.find(item => item.id === id);
+    if (!appointment) return;
+    persist({
+      ...data,
+      appointments: data.appointments.map(item => item.id === id ? { ...item, time } : item),
+    }, `${appointment.name} movido para ${time}.`);
+  }
+
   function addManualAppointment(input: { name: string; phone: string; time: string; serviceId: string }) {
     if (!data || !input.name || !input.time || !input.serviceId) return;
     const service = data.services.find(item => item.id === input.serviceId);
@@ -168,6 +178,7 @@ export default function Admin() {
               onTogglePayment={togglePayment}
               onCancel={cancelAppointment}
               onCreate={addManualAppointment}
+              onMove={moveAppointment}
             />}
 
             {tab === 'servicos' && <>
