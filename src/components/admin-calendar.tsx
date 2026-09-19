@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Calendar, money } from '@/lib/api';
 import { demoMonths } from '@/lib/demo';
 
@@ -149,11 +149,8 @@ export function AgendaWorkspace({
     const dragRef = useRef<{
         id: string;
         pointerId: number;
-        startY: number;
         offsetY: number;
         originalMinute: number;
-        active: boolean;
-        holdTimer: number | null;
     } | null>(null);
 
     const allDayAppointments = data.appointments
@@ -263,102 +260,83 @@ export function AgendaWorkspace({
         return Math.max(startMinute, Math.min(endMinute - appointment.minutes, snapped));
     }
 
-    function activateDrag(id: string, minute: number) {
-        if (!dragRef.current || dragRef.current.id !== id) return;
-        dragRef.current.active = true;
-        const validation = validateMove(id, minute);
-        setSelected(null);
-        setDragFeedback('Arraste e solte no novo horário.');
-        const preview = { id, minute, ...validation };
-        dragPreviewRef.current = preview;
-        setDragging(preview);
-    }
-
-    function handleDragPointerDown(event: ReactPointerEvent<HTMLElement>, id: string) {
+    function beginDrag(event: ReactPointerEvent<HTMLButtonElement>, id: string) {
         const appointment = data.appointments.find(item => item.id === id);
         const track = trackRef.current;
         if (!appointment || !track || appointment.status !== 'confirmed') return;
 
+        event.preventDefault();
         event.stopPropagation();
+
         const originalMinute = minutesFromTime(appointment.time);
         const trackRect = track.getBoundingClientRect();
         const eventTop = (originalMinute - startMinute) * pxPerMinute;
         const offsetY = Math.max(0, Math.min(appointment.minutes * pxPerMinute, event.clientY - trackRect.top - eventTop));
 
-        const state = {
+        dragRef.current = {
             id,
             pointerId: event.pointerId,
-            startY: event.clientY,
             offsetY,
             originalMinute,
-            active: false,
-            holdTimer: null as number | null,
         };
 
-        dragRef.current = state;
-        event.currentTarget.setPointerCapture(event.pointerId);
-
-        if (event.pointerType === 'touch') {
-            state.holdTimer = window.setTimeout(() => activateDrag(id, originalMinute), 240);
-        } else {
-            activateDrag(id, originalMinute);
-        }
-    }
-
-    function handleDragPointerMove(event: ReactPointerEvent<HTMLElement>) {
-        const current = dragRef.current;
-        if (!current || current.pointerId !== event.pointerId) return;
-
-        if (!dragRef.current?.active) return;
-        event.preventDefault();
-        event.stopPropagation();
-
-        const minute = minuteFromPointer(event.clientY, current.id, current.offsetY);
-        const validation = validateMove(current.id, minute);
-        const preview = { id: current.id, minute, ...validation };
+        const validation = validateMove(id, originalMinute);
+        const preview = { id, minute: originalMinute, ...validation };
         dragPreviewRef.current = preview;
         setDragging(preview);
-        setDragFeedback(validation.valid ? `Soltar em ${timeFromMinute(minute)}` : validation.reason);
+        setSelected(null);
+        setDragFeedback('Arraste para cima ou para baixo e solte no novo horário.');
+        document.body.classList.add('agenda-dragging-body');
     }
 
-    function finishDrag(event: ReactPointerEvent<HTMLElement>) {
-        const current = dragRef.current;
-        if (!current || current.pointerId !== event.pointerId) return;
+    useEffect(() => {
+        function handlePointerMove(event: PointerEvent) {
+            const current = dragRef.current;
+            if (!current || event.pointerId !== current.pointerId) return;
 
-        if (current.holdTimer !== null) window.clearTimeout(current.holdTimer);
-
-        const preview = dragPreviewRef.current;
-        if (current.active && preview?.id === current.id) {
             event.preventDefault();
-            event.stopPropagation();
-            if (preview.valid && preview.minute !== current.originalMinute) {
+            const minute = minuteFromPointer(event.clientY, current.id, current.offsetY);
+            const validation = validateMove(current.id, minute);
+            const preview = { id: current.id, minute, ...validation };
+
+            dragPreviewRef.current = preview;
+            setDragging(preview);
+            setDragFeedback(validation.valid ? `Soltar em ${timeFromMinute(minute)}` : validation.reason);
+        }
+
+        function finishPointerDrag(event: PointerEvent) {
+            const current = dragRef.current;
+            if (!current || event.pointerId !== current.pointerId) return;
+
+            event.preventDefault();
+            const preview = dragPreviewRef.current;
+
+            if (preview?.id === current.id && preview.valid && preview.minute !== current.originalMinute) {
                 onMove(current.id, timeFromMinute(preview.minute));
                 setDragFeedback(`Atendimento movido para ${timeFromMinute(preview.minute)}.`);
-            } else if (!preview.valid) {
+            } else if (preview && !preview.valid) {
                 setDragFeedback(preview.reason);
             } else {
                 setDragFeedback('Horário mantido.');
             }
+
+            dragRef.current = null;
+            dragPreviewRef.current = null;
+            setDragging(null);
+            document.body.classList.remove('agenda-dragging-body');
         }
 
-        try {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-        } catch {}
-        dragRef.current = null;
-        dragPreviewRef.current = null;
-        setDragging(null);
-    }
+        window.addEventListener('pointermove', handlePointerMove, { passive: false });
+        window.addEventListener('pointerup', finishPointerDrag, { passive: false });
+        window.addEventListener('pointercancel', finishPointerDrag, { passive: false });
 
-    function cancelDrag(event: ReactPointerEvent<HTMLElement>) {
-        const current = dragRef.current;
-        if (current?.holdTimer !== null && current?.holdTimer !== undefined) window.clearTimeout(current.holdTimer);
-        try {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-        } catch {}
-        dragRef.current = null;
-        setDragging(null);
-    }
-
+        return () => {
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', finishPointerDrag);
+            window.removeEventListener('pointercancel', finishPointerDrag);
+            document.body.classList.remove('agenda-dragging-body');
+        };
+    }, [data, date, startMinute, endMinute, onMove]);
 
     function submitNewAppointment(form: HTMLFormElement) {
         const formData = new FormData(form);
@@ -418,7 +396,7 @@ export function AgendaWorkspace({
 
         {mode === 'day' && <div className={dragFeedback ? "agenda-drag-feedback is-visible" : "agenda-drag-feedback"}>
             <span>↕</span>
-            <p>{dragFeedback || 'Arraste pelo botão ↕ ou pelo nome do cliente. No celular, segure por um instante e arraste.'}</p>
+            <p>{dragFeedback || 'Use o botão ↕ do agendamento: segure e arraste para cima ou para baixo.'}</p>
         </div>}
 
         {mode === 'day' && <div className="agenda-timeline-shell">
@@ -458,7 +436,13 @@ export function AgendaWorkspace({
                         return <article
                             key={appointment.id}
                             className={`agenda-event ${appointment.status === 'cancelled' ? 'is-cancelled' : ''} ${appointment.payment ? 'is-paid' : ''} ${isSelected ? 'is-selected' : ''} ${dragging?.id === appointment.id ? 'is-being-dragged' : ''}`}
-                            style={{ top, minHeight: Math.max(52, appointment.minutes * pxPerMinute - 5) }}
+                            style={{
+                                top,
+                                minHeight: Math.max(52, appointment.minutes * pxPerMinute - 5),
+                                transform: dragging?.id === appointment.id
+                                    ? `translateY(${(dragging.minute - minutesFromTime(appointment.time)) * pxPerMinute}px)`
+                                    : undefined,
+                            }}
                         >
                             {appointment.status === 'confirmed' && <button
                                 type="button"
@@ -466,10 +450,7 @@ export function AgendaWorkspace({
                                 aria-label={`Arrastar ${appointment.name} para outro horário`}
                                 title="Segure e arraste para mudar o horário"
                                 onClick={event => event.stopPropagation()}
-                                onPointerDown={event => handleDragPointerDown(event, appointment.id)}
-                                onPointerMove={handleDragPointerMove}
-                                onPointerUp={finishDrag}
-                                onPointerCancel={cancelDrag}
+                                onPointerDown={event => beginDrag(event, appointment.id)}
                             >↕</button>}
                             <div
                                 className="agenda-event-main"
@@ -484,14 +465,9 @@ export function AgendaWorkspace({
                                 }}
                             >
                                 <span className="agenda-event-copy">
-                                    <strong
-                                        className="agenda-drag-name"
-                                        title={appointment.status === 'confirmed' ? 'Arraste para mudar o horário' : undefined}
-                                        onPointerDown={event => handleDragPointerDown(event, appointment.id)}
-                                        onPointerMove={handleDragPointerMove}
-                                        onPointerUp={finishDrag}
-                                        onPointerCancel={cancelDrag}
-                                    ><span className="agenda-drag-grip" aria-hidden="true">⋮⋮</span>{appointment.name}</strong>
+                                    <strong className="agenda-drag-name">
+                                        <span className="agenda-drag-grip" aria-hidden="true">⋮⋮</span>{appointment.name}
+                                    </strong>
                                     <span>{appointment.service}</span>
                                     <small>◷ {appointment.minutes} min &nbsp; · &nbsp; {money(appointment.price)} {appointment.source === 'walk-in' ? ' · Presencial' : ''}</small>
                                 </span>
