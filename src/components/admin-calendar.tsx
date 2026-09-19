@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from 'react';
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Calendar, money } from '@/lib/api';
 import { demoMonths } from '@/lib/demo';
 
@@ -145,6 +145,7 @@ export function AgendaWorkspace({
     const [dragging, setDragging] = useState<{ id: string; minute: number; valid: boolean; reason: string } | null>(null);
     const [dragFeedback, setDragFeedback] = useState('');
     const trackRef = useRef<HTMLDivElement | null>(null);
+    const dragPreviewRef = useRef<{ id: string; minute: number; valid: boolean; reason: string } | null>(null);
     const dragRef = useRef<{
         id: string;
         pointerId: number;
@@ -268,10 +269,12 @@ export function AgendaWorkspace({
         const validation = validateMove(id, minute);
         setSelected(null);
         setDragFeedback('Arraste e solte no novo horário.');
-        setDragging({ id, minute, ...validation });
+        const preview = { id, minute, ...validation };
+        dragPreviewRef.current = preview;
+        setDragging(preview);
     }
 
-    function handleDragPointerDown(event: React.PointerEvent<HTMLElement>, id: string) {
+    function handleDragPointerDown(event: ReactPointerEvent<HTMLElement>, id: string) {
         const appointment = data.appointments.find(item => item.id === id);
         const track = trackRef.current;
         if (!appointment || !track || appointment.status !== 'confirmed') return;
@@ -300,7 +303,7 @@ export function AgendaWorkspace({
         }
     }
 
-    function handleDragPointerMove(event: React.PointerEvent<HTMLElement>) {
+    function handleDragPointerMove(event: ReactPointerEvent<HTMLElement>) {
         const current = dragRef.current;
         if (!current || current.pointerId !== event.pointerId) return;
 
@@ -313,17 +316,19 @@ export function AgendaWorkspace({
 
         const minute = minuteFromPointer(event.clientY, current.id, current.offsetY);
         const validation = validateMove(current.id, minute);
-        setDragging({ id: current.id, minute, ...validation });
+        const preview = { id: current.id, minute, ...validation };
+        dragPreviewRef.current = preview;
+        setDragging(preview);
         setDragFeedback(validation.valid ? `Soltar em ${timeFromMinute(minute)}` : validation.reason);
     }
 
-    function finishDrag(event: React.PointerEvent<HTMLElement>) {
+    function finishDrag(event: ReactPointerEvent<HTMLElement>) {
         const current = dragRef.current;
         if (!current || current.pointerId !== event.pointerId) return;
 
         if (current.holdTimer !== null) window.clearTimeout(current.holdTimer);
 
-        const preview = dragging;
+        const preview = dragPreviewRef.current;
         if (current.active && preview?.id === current.id) {
             event.preventDefault();
             event.stopPropagation();
@@ -341,10 +346,11 @@ export function AgendaWorkspace({
             event.currentTarget.releasePointerCapture(event.pointerId);
         } catch {}
         dragRef.current = null;
+        dragPreviewRef.current = null;
         setDragging(null);
     }
 
-    function cancelDrag(event: React.PointerEvent<HTMLElement>) {
+    function cancelDrag(event: ReactPointerEvent<HTMLElement>) {
         const current = dragRef.current;
         if (current?.holdTimer !== null && current?.holdTimer !== undefined) window.clearTimeout(current.holdTimer);
         try {
