@@ -5,6 +5,7 @@ import Link from 'next/link';
 import BrandLogo from '@/components/brand-logo';
 import YsBrand from '@/components/ys-brand';
 import Earnings from '@/components/earnings';
+import ServicesCatalog from '@/components/services-catalog';
 import AdminCalendar, { AgendaWorkspace, Dashboard } from '@/components/admin-calendar';
 import { Calendar, Service, Settings, clock, money, minute } from '@/lib/api';
 import { DEMO_TODAY, demoClients, loadDemoCalendar, resetDemoCalendar, saveDemoCalendar } from '@/lib/demo';
@@ -15,7 +16,6 @@ export default function Admin() {
   const [data, setData] = useState<Calendar | null>(null);
   const [tab, setTab] = useState('dashboard');
   const [date, setDate] = useState(DEMO_TODAY);
-  const [editing, setEditing] = useState<Service | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [notice, setNotice] = useState('');
   const [clients, setClients] = useState<DemoClient[]>(demoClients);
@@ -68,14 +68,21 @@ export default function Admin() {
       ? data.services.map(s => s.id === service.id ? service : s)
       : [...data.services, { ...service, id: crypto.randomUUID() }];
     persist({ ...data, services: nextServices }, 'Serviço salvo.');
-    setEditing(null);
   }
 
   function deleteService(service: Service) {
     if (!data) return;
     if (!window.confirm(`Excluir "${service.name}"? Os atendimentos já registrados continuarão intactos.`)) return;
     persist({ ...data, services: data.services.filter(item => item.id !== service.id) }, 'Serviço excluído da demonstração. Atendimentos anteriores foram preservados.');
-    setEditing(null);
+  }
+
+  function toggleServiceActive(service: Service) {
+    if (!data) return;
+    const next = { ...service, active: !service.active };
+    persist({
+      ...data,
+      services: data.services.map(item => item.id === service.id ? next : item),
+    }, next.active ? 'Serviço ativado.' : 'Serviço pausado.');
   }
 
   function saveSettings() {
@@ -181,18 +188,13 @@ export default function Admin() {
               onMove={moveAppointment}
             />}
 
-            {tab === 'servicos' && <>
-              <button className="primary" onClick={() => setEditing({ id: '', name: '', description: '', price: 0, minutes: 30, active: true })}>+ Novo serviço</button>
-              {editing && <form className="service-form" onSubmit={e => { e.preventDefault(); saveService(editing); }}>
-                <h2>{editing.id ? 'Editar serviço' : 'Novo serviço'}</h2>
-                <label>Nome<input required maxLength={80} value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} /></label>
-                <label>Descrição<input maxLength={240} value={editing.description} onChange={e => setEditing({ ...editing, description: e.target.value })} /></label>
-                <div className="form-row"><label>Preço (R$)<input type="number" min={0} step="0.01" required value={editing.price} onChange={e => setEditing({ ...editing, price: Number(e.target.value) })} /></label><label>Duração (min)<input type="number" min={5} required value={editing.minutes} onChange={e => setEditing({ ...editing, minutes: Number(e.target.value) })} /></label></div>
-                <label className="checkbox"><input type="checkbox" checked={editing.active} onChange={e => setEditing({ ...editing, active: e.target.checked })} />Disponível para novos agendamentos</label>
-                <div className="form-row"><button className="primary">Salvar serviço</button><button type="button" className="text-button" onClick={() => setEditing(null)}>Voltar</button></div>
-              </form>}
-              <div className="admin-services">{data.services.map(s => <article className="appointment" key={s.id}><div><h3>{s.name}</h3><p>{s.description}<br />{s.minutes} minutos · {s.active ? 'Ativo' : 'Pausado'}</p></div><strong>{money(s.price)}</strong><button className="text-button" onClick={() => setEditing({ ...s })}>Editar</button><button className="text-button" onClick={() => deleteService(s)}>Excluir</button></article>)}</div>
-            </>}
+            {tab === 'servicos' && <ServicesCatalog
+              data={data}
+              monthKey={date.slice(0, 7)}
+              onSave={saveService}
+              onDelete={deleteService}
+              onToggle={toggleServiceActive}
+            />}
 
             {tab === 'disponibilidade' && settings && <>
               <form className="service-form" onSubmit={e => { e.preventDefault(); saveSettings(); }}>
