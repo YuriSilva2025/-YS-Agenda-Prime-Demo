@@ -1041,3 +1041,35 @@ footer .ys-brand{margin-left:auto}
     font-size:13px;
   }
 }
+
+
+/* ==========================================================
+   DRAG GLOBAL — CARTÃO ACOMPANHA O PONTEIRO
+   ========================================================== */
+body.agenda-dragging-body{
+  user-select:none;
+  -webkit-user-select:none;
+  overflow-x:hidden;
+}
+body.agenda-dragging-body *{
+  cursor:grabbing!important;
+}
+.agenda-event{
+  transition:transform .06s linear, opacity .12s ease, box-shadow .12s ease;
+}
+.agenda-event.is-being-dragged{
+  z-index:35!important;
+  opacity:.82!important;
+  pointer-events:none;
+  box-shadow:0 18px 42px rgba(0,0,0,.5);
+}
+.agenda-move-handle{
+  touch-action:none!important;
+  -webkit-user-select:none;
+  user-select:none;
+}
+@media(max-width:620px){
+  .agenda-event.is-being-dragged{
+    opacity:.9!important;
+  }
+}
