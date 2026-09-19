@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Calendar, money } from '@/lib/api';
 import { demoMonths } from '@/lib/demo';
 
@@ -146,7 +146,6 @@ export function AgendaWorkspace({
     const [dragFeedback, setDragFeedback] = useState('');
     const trackRef = useRef<HTMLDivElement | null>(null);
     const dragPreviewRef = useRef<{ id: string; minute: number; valid: boolean; reason: string } | null>(null);
-    const desktopDragRef = useRef<{ id: string } | null>(null);
     const dragRef = useRef<{
         id: string;
         pointerId: number;
@@ -276,7 +275,6 @@ export function AgendaWorkspace({
     }
 
     function handleDragPointerDown(event: ReactPointerEvent<HTMLElement>, id: string) {
-        if (event.pointerType !== 'touch') return;
         const appointment = data.appointments.find(item => item.id === id);
         const track = trackRef.current;
         if (!appointment || !track || appointment.status !== 'confirmed') return;
@@ -301,7 +299,9 @@ export function AgendaWorkspace({
         event.currentTarget.setPointerCapture(event.pointerId);
 
         if (event.pointerType === 'touch') {
-            state.holdTimer = window.setTimeout(() => activateDrag(id, originalMinute), 320);
+            state.holdTimer = window.setTimeout(() => activateDrag(id, originalMinute), 240);
+        } else {
+            activateDrag(id, originalMinute);
         }
     }
 
@@ -311,6 +311,7 @@ export function AgendaWorkspace({
 
         if (!dragRef.current?.active) return;
         event.preventDefault();
+        event.stopPropagation();
 
         const minute = minuteFromPointer(event.clientY, current.id, current.offsetY);
         const validation = validateMove(current.id, minute);
@@ -358,68 +359,6 @@ export function AgendaWorkspace({
         setDragging(null);
     }
 
-
-    function startDesktopDrag(event: ReactDragEvent<HTMLElement>, id: string) {
-        const appointment = data.appointments.find(item => item.id === id);
-        if (!appointment || appointment.status !== 'confirmed') {
-            event.preventDefault();
-            return;
-        }
-
-        desktopDragRef.current = { id };
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', id);
-        const minute = minutesFromTime(appointment.time);
-        const validation = validateMove(id, minute);
-        const preview = { id, minute, ...validation };
-        dragPreviewRef.current = preview;
-        setDragging(preview);
-        setSelected(null);
-        setDragFeedback('Arraste o cliente até o novo horário.');
-    }
-
-    function handleDesktopDragOver(event: ReactDragEvent<HTMLDivElement>) {
-        const current = desktopDragRef.current;
-        if (!current) return;
-
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'move';
-        const minute = minuteFromPointer(event.clientY, current.id, 0);
-        const validation = validateMove(current.id, minute);
-        const preview = { id: current.id, minute, ...validation };
-        dragPreviewRef.current = preview;
-        setDragging(preview);
-        setDragFeedback(validation.valid ? `Soltar em ${timeFromMinute(minute)}` : validation.reason);
-    }
-
-    function finishDesktopDrop(event: ReactDragEvent<HTMLDivElement>) {
-        const current = desktopDragRef.current;
-        if (!current) return;
-
-        event.preventDefault();
-        const preview = dragPreviewRef.current;
-        const appointment = data.appointments.find(item => item.id === current.id);
-        const originalMinute = appointment ? minutesFromTime(appointment.time) : null;
-
-        if (preview?.id === current.id && preview.valid && originalMinute !== null && preview.minute !== originalMinute) {
-            onMove(current.id, timeFromMinute(preview.minute));
-            setDragFeedback(`Atendimento movido para ${timeFromMinute(preview.minute)}.`);
-        } else if (preview && !preview.valid) {
-            setDragFeedback(preview.reason);
-        } else {
-            setDragFeedback('Horário mantido.');
-        }
-
-        desktopDragRef.current = null;
-        dragPreviewRef.current = null;
-        setDragging(null);
-    }
-
-    function endDesktopDrag() {
-        desktopDragRef.current = null;
-        dragPreviewRef.current = null;
-        setDragging(null);
-    }
 
     function submitNewAppointment(form: HTMLFormElement) {
         const formData = new FormData(form);
@@ -479,7 +418,7 @@ export function AgendaWorkspace({
 
         {mode === 'day' && <div className={dragFeedback ? "agenda-drag-feedback is-visible" : "agenda-drag-feedback"}>
             <span>↕</span>
-            <p>{dragFeedback || 'PC: arraste o nome do cliente. Celular: segure o nome por um instante e arraste.'}</p>
+            <p>{dragFeedback || 'Arraste pelo botão ↕ ou pelo nome do cliente. No celular, segure por um instante e arraste.'}</p>
         </div>}
 
         {mode === 'day' && <div className="agenda-timeline-shell">
@@ -490,8 +429,6 @@ export function AgendaWorkspace({
                 <div
                     className={dragging ? "agenda-track is-dragging" : "agenda-track"}
                     ref={trackRef}
-                    onDragOver={handleDesktopDragOver}
-                    onDrop={finishDesktopDrop}
                 >
                     {halfHourMarks.map(value => <i key={value} className={value % 60 === 0 ? 'hour-line' : 'half-line'} style={{ top: (value - startMinute) * pxPerMinute }} />)}
 
@@ -520,9 +457,20 @@ export function AgendaWorkspace({
                         const isSelected = selected === appointment.id;
                         return <article
                             key={appointment.id}
-                            className={`agenda-event ${appointment.status === 'cancelled' ? 'is-cancelled' : ''} ${appointment.payment ? 'is-paid' : ''} ${isSelected ? 'is-selected' : ''}`}
+                            className={`agenda-event ${appointment.status === 'cancelled' ? 'is-cancelled' : ''} ${appointment.payment ? 'is-paid' : ''} ${isSelected ? 'is-selected' : ''} ${dragging?.id === appointment.id ? 'is-being-dragged' : ''}`}
                             style={{ top, minHeight: Math.max(52, appointment.minutes * pxPerMinute - 5) }}
                         >
+                            {appointment.status === 'confirmed' && <button
+                                type="button"
+                                className="agenda-move-handle"
+                                aria-label={`Arrastar ${appointment.name} para outro horário`}
+                                title="Segure e arraste para mudar o horário"
+                                onClick={event => event.stopPropagation()}
+                                onPointerDown={event => handleDragPointerDown(event, appointment.id)}
+                                onPointerMove={handleDragPointerMove}
+                                onPointerUp={finishDrag}
+                                onPointerCancel={cancelDrag}
+                            >↕</button>}
                             <div
                                 className="agenda-event-main"
                                 role="button"
@@ -538,10 +486,7 @@ export function AgendaWorkspace({
                                 <span className="agenda-event-copy">
                                     <strong
                                         className="agenda-drag-name"
-                                        title={appointment.status === 'confirmed' ? 'Arraste no PC ou segure no celular para mudar o horário' : undefined}
-                                        draggable={appointment.status === 'confirmed'}
-                                        onDragStart={event => startDesktopDrag(event, appointment.id)}
-                                        onDragEnd={endDesktopDrag}
+                                        title={appointment.status === 'confirmed' ? 'Arraste para mudar o horário' : undefined}
                                         onPointerDown={event => handleDragPointerDown(event, appointment.id)}
                                         onPointerMove={handleDragPointerMove}
                                         onPointerUp={finishDrag}
