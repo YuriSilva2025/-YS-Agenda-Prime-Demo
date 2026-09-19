@@ -990,3 +990,54 @@ footer .ys-brand{margin-left:auto}
   .services-editor-head h2{font-size:21px}
   .services-editor-actions .primary{width:100%}
 }
+
+
+/* ==========================================================
+   ALÇA DE REMARCAÇÃO — DRAG ROBUSTO
+   ========================================================== */
+.agenda-event{padding-right:36px}
+.agenda-move-handle{
+  position:absolute;
+  top:7px;
+  right:7px;
+  z-index:16;
+  width:28px;
+  height:28px;
+  display:grid;
+  place-items:center;
+  border:1px solid #665532;
+  border-radius:8px;
+  background:#1a1710;
+  color:#e4bd69;
+  font-size:14px;
+  line-height:1;
+  cursor:grab;
+  touch-action:none;
+  user-select:none;
+  -webkit-user-select:none;
+  box-shadow:0 6px 16px rgba(0,0,0,.22);
+}
+.agenda-move-handle:hover{
+  border-color:#9a7c43;
+  background:#211c11;
+  color:#f0cb7c;
+}
+.agenda-move-handle:active{cursor:grabbing}
+.agenda-event.is-being-dragged{
+  opacity:.45!important;
+  outline:1px dashed #8e7440;
+  outline-offset:2px;
+}
+.agenda-drag-name{
+  touch-action:none;
+}
+@media(max-width:620px){
+  .agenda-event{padding-right:34px}
+  .agenda-move-handle{
+    top:6px;
+    right:6px;
+    width:26px;
+    height:26px;
+    font-size:13px;
+  }
+}
