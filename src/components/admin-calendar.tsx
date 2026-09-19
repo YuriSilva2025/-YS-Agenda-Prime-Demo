@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Calendar, money } from '@/lib/api';
 import { demoMonths } from '@/lib/demo';
 
@@ -146,6 +146,7 @@ export function AgendaWorkspace({
     const [dragFeedback, setDragFeedback] = useState('');
     const trackRef = useRef<HTMLDivElement | null>(null);
     const dragPreviewRef = useRef<{ id: string; minute: number; valid: boolean; reason: string } | null>(null);
+    const desktopDragRef = useRef<{ id: string } | null>(null);
     const dragRef = useRef<{
         id: string;
         pointerId: number;
@@ -275,6 +276,7 @@ export function AgendaWorkspace({
     }
 
     function handleDragPointerDown(event: ReactPointerEvent<HTMLElement>, id: string) {
+        if (event.pointerType !== 'touch') return;
         const appointment = data.appointments.find(item => item.id === id);
         const track = trackRef.current;
         if (!appointment || !track || appointment.status !== 'confirmed') return;
@@ -306,10 +308,6 @@ export function AgendaWorkspace({
     function handleDragPointerMove(event: ReactPointerEvent<HTMLElement>) {
         const current = dragRef.current;
         if (!current || current.pointerId !== event.pointerId) return;
-
-        if (!current.active && event.pointerType !== 'touch' && Math.abs(event.clientY - current.startY) > 5) {
-            activateDrag(current.id, current.originalMinute);
-        }
 
         if (!dragRef.current?.active) return;
         event.preventDefault();
@@ -357,6 +355,69 @@ export function AgendaWorkspace({
             event.currentTarget.releasePointerCapture(event.pointerId);
         } catch {}
         dragRef.current = null;
+        setDragging(null);
+    }
+
+
+    function startDesktopDrag(event: ReactDragEvent<HTMLElement>, id: string) {
+        const appointment = data.appointments.find(item => item.id === id);
+        if (!appointment || appointment.status !== 'confirmed') {
+            event.preventDefault();
+            return;
+        }
+
+        desktopDragRef.current = { id };
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', id);
+        const minute = minutesFromTime(appointment.time);
+        const validation = validateMove(id, minute);
+        const preview = { id, minute, ...validation };
+        dragPreviewRef.current = preview;
+        setDragging(preview);
+        setSelected(null);
+        setDragFeedback('Arraste o cliente até o novo horário.');
+    }
+
+    function handleDesktopDragOver(event: ReactDragEvent<HTMLDivElement>) {
+        const current = desktopDragRef.current;
+        if (!current) return;
+
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        const minute = minuteFromPointer(event.clientY, current.id, 0);
+        const validation = validateMove(current.id, minute);
+        const preview = { id: current.id, minute, ...validation };
+        dragPreviewRef.current = preview;
+        setDragging(preview);
+        setDragFeedback(validation.valid ? `Soltar em ${timeFromMinute(minute)}` : validation.reason);
+    }
+
+    function finishDesktopDrop(event: ReactDragEvent<HTMLDivElement>) {
+        const current = desktopDragRef.current;
+        if (!current) return;
+
+        event.preventDefault();
+        const preview = dragPreviewRef.current;
+        const appointment = data.appointments.find(item => item.id === current.id);
+        const originalMinute = appointment ? minutesFromTime(appointment.time) : null;
+
+        if (preview?.id === current.id && preview.valid && originalMinute !== null && preview.minute !== originalMinute) {
+            onMove(current.id, timeFromMinute(preview.minute));
+            setDragFeedback(`Atendimento movido para ${timeFromMinute(preview.minute)}.`);
+        } else if (preview && !preview.valid) {
+            setDragFeedback(preview.reason);
+        } else {
+            setDragFeedback('Horário mantido.');
+        }
+
+        desktopDragRef.current = null;
+        dragPreviewRef.current = null;
+        setDragging(null);
+    }
+
+    function endDesktopDrag() {
+        desktopDragRef.current = null;
+        dragPreviewRef.current = null;
         setDragging(null);
     }
 
@@ -426,7 +487,12 @@ export function AgendaWorkspace({
                 <div className="agenda-time-axis">
                     {hourMarks.map(value => <span key={value} style={{ top: (value - startMinute) * pxPerMinute }}>{String(Math.floor(value / 60)).padStart(2, '0')}:00</span>)}
                 </div>
-                <div className={dragging ? "agenda-track is-dragging" : "agenda-track"} ref={trackRef}>
+                <div
+                    className={dragging ? "agenda-track is-dragging" : "agenda-track"}
+                    ref={trackRef}
+                    onDragOver={handleDesktopDragOver}
+                    onDrop={finishDesktopDrop}
+                >
                     {halfHourMarks.map(value => <i key={value} className={value % 60 === 0 ? 'hour-line' : 'half-line'} style={{ top: (value - startMinute) * pxPerMinute }} />)}
 
                     {blocks.map(block => <div
@@ -457,11 +523,25 @@ export function AgendaWorkspace({
                             className={`agenda-event ${appointment.status === 'cancelled' ? 'is-cancelled' : ''} ${appointment.payment ? 'is-paid' : ''} ${isSelected ? 'is-selected' : ''}`}
                             style={{ top, minHeight: Math.max(52, appointment.minutes * pxPerMinute - 5) }}
                         >
-                            <button type="button" className="agenda-event-main" onClick={() => setSelected(isSelected ? null : appointment.id)}>
+                            <div
+                                className="agenda-event-main"
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelected(isSelected ? null : appointment.id)}
+                                onKeyDown={event => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault();
+                                        setSelected(isSelected ? null : appointment.id);
+                                    }
+                                }}
+                            >
                                 <span className="agenda-event-copy">
                                     <strong
                                         className="agenda-drag-name"
-                                        title={appointment.status === 'confirmed' ? 'Segure e arraste para mudar o horário' : undefined}
+                                        title={appointment.status === 'confirmed' ? 'Arraste no PC ou segure no celular para mudar o horário' : undefined}
+                                        draggable={appointment.status === 'confirmed'}
+                                        onDragStart={event => startDesktopDrag(event, appointment.id)}
+                                        onDragEnd={endDesktopDrag}
                                         onPointerDown={event => handleDragPointerDown(event, appointment.id)}
                                         onPointerMove={handleDragPointerMove}
                                         onPointerUp={finishDrag}
@@ -473,7 +553,7 @@ export function AgendaWorkspace({
                                 <span className={appointment.payment ? 'agenda-event-status paid' : appointment.status === 'cancelled' ? 'agenda-event-status cancelled' : 'agenda-event-status'}>
                                     {appointment.payment ? 'Recebido' : appointment.status === 'cancelled' ? 'Cancelado' : 'Agendado'}
                                 </span>
-                            </button>
+                            </div>
                             {isSelected && appointment.status === 'confirmed' && <div className="agenda-event-actions">
                                 <button type="button" onClick={() => onAddExtra(appointment.id)}>+ Serviço extra</button>
                                 <button type="button" onClick={() => onTogglePayment(appointment.id)}>{appointment.payment ? 'Desfazer recebido' : 'Marcar recebido'}</button>
