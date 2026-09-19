@@ -227,6 +227,37 @@ export default function Earnings({
     )
     .slice(0, 10);
 
+
+  const serviceRanking = demo
+    ? [
+        { name: "Atendimento Essencial", count: 26, total: 1040 },
+        { name: "Atendimento Premium", count: 18, total: 1080 },
+        { name: "Pacote Completo", count: 11, total: 935 },
+        { name: "Serviço Adicional", count: 6, total: 150 },
+      ]
+    : Object.values(
+        data.appointments
+          .filter((appointment) => appointment.status === "confirmed")
+          .reduce<Record<string, { name: string; count: number; total: number }>>(
+            (acc, appointment) => {
+              const name = appointment.service;
+              const current = acc[name] ?? { name, count: 0, total: 0 };
+              current.count += 1;
+              current.total += appointment.price;
+              acc[name] = current;
+              return acc;
+            },
+            {},
+          ),
+      )
+        .sort((a, b) => b.count - a.count || b.total - a.total)
+        .slice(0, 5);
+
+  const serviceRankingMax = Math.max(
+    ...serviceRanking.map((service) => service.count),
+    1,
+  );
+
   const switchMode = (nextMode: "month" | "week") => {
     setMode(nextMode);
     setHoveredPoint(null);
@@ -489,6 +520,42 @@ export default function Earnings({
               ? "Dados fictícios para apresentação"
               : "Dados registrados no sistema"}
           </strong>
+        </div>
+      </section>
+
+      <section className="ys-top-services" aria-label="Serviços mais realizados">
+        <div className="ys-top-services-head">
+          <div>
+            <p className="eyebrow">DESTAQUES DO MÊS</p>
+            <h2>Serviços mais realizados</h2>
+            <p>Veja quais atendimentos mais saíram no período.</p>
+          </div>
+          <span>{demo ? "Demonstração" : "Dados do sistema"}</span>
+        </div>
+
+        <div className="ys-top-services-list">
+          {serviceRanking.map((service, index) => (
+            <article className="ys-top-service" key={service.name}>
+              <div className="ys-top-service-row">
+                <div>
+                  <b>{index + 1}</b>
+                  <strong>{service.name}</strong>
+                </div>
+                <div className="ys-top-service-values">
+                  <strong>{service.count}x</strong>
+                  <span>{money(service.total)}</span>
+                </div>
+              </div>
+              <div className="ys-top-service-track" aria-hidden="true">
+                <i style={{ width: `${(service.count / serviceRankingMax) * 100}%` }} />
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <div className="ys-top-services-footer">
+          <span>Quantidade de atendimentos</span>
+          <strong>{demo ? "Dados fictícios para apresentação" : "Atualizado com os atendimentos registrados"}</strong>
         </div>
       </section>
 
