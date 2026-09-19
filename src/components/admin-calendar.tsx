@@ -6,16 +6,96 @@ const key = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 const parse = (d: string) => new Date(d + 'T12:00:00');
 export function Dashboard({ data, today, onAgenda, demo = false }: { data: Calendar; today: string; onAgenda: () => void; demo?: boolean }) {
     const confirmed = data.appointments.filter(a => a.status === 'confirmed');
+    const todayAppointments = confirmed.filter(a => a.date === today).sort((a, b) => a.time.localeCompare(b.time));
     const month = confirmed.filter(a => a.date.startsWith(today.slice(0, 7)));
     const demoMonth = demoMonths[demoMonths.length - 1];
+    const todayRevenue = todayAppointments.reduce((n, a) => n + (a.payment?.amount ?? 0), 0);
     const nowTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
     const next = confirmed.filter(a => a.date > today || (a.date === today && a.time >= nowTime)).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).slice(0, 5);
-    return <><p className="muted">Um olhar sobre o seu dia e o movimento deste mês.</p><div className="stats dashboard-stats">
-        <article><span>Reservas de hoje</span><strong>{confirmed.filter(a => a.date === today).length}</strong><small>Agendamentos confirmados</small></article>
-        <article><span>Reservas do mês</span><strong>{demo ? demoMonth.count : month.length}</strong><small>{today && parse(today).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</small></article>
-        <article><span>Valor previsto no mês</span><strong>{money(demo ? demoMonth.total : month.reduce((n, a) => n + a.price, 0))}</strong><small>{demo ? 'Dados fictícios para apresentação' : 'Somente reservas confirmadas'}</small></article>
-    </div><div className="section-heading"><h2>Próximos agendamentos</h2><button className="text-button" onClick={onAgenda}>Abrir agenda →</button></div>
-    {next.length ? <div className="appointment-list">{next.map(a => <article className="appointment" key={a.id}><strong className="appointment-time">{a.time}</strong><div><h3>{a.name}</h3><p>{a.service} · {parse(a.date).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}</p></div><strong>{money(a.price)}</strong></article>)}</div> : <div className="calendar-empty">Sua agenda está livre por enquanto.<p>As próximas reservas aparecerão aqui.</p></div>}</>;
+    const workMinutes = data.settings.periods.reduce((sum, period) => sum + Math.max(0, period.end - period.start), 0);
+    const bookedMinutes = todayAppointments.reduce((sum, appointment) => sum + appointment.minutes, 0);
+    const freeMinutes = Math.max(0, workMinutes - bookedMinutes);
+    const freeHours = freeMinutes / 60;
+    const freeLabel = freeHours % 1 === 0 ? `${freeHours.toFixed(0)}h` : `${freeHours.toFixed(1).replace('.', ',')}h`;
+
+    return <section className="dashboard-modern">
+      <div className="dashboard-welcome">
+        <div>
+          <p className="eyebrow">RESUMO DO NEGÓCIO</p>
+          <h2>Olá! Aqui está o movimento de hoje.</h2>
+        </div>
+        <button className="dashboard-period" type="button">Hoje</button>
+      </div>
+
+      <div className="dashboard-kpis">
+        <article className="dashboard-kpi">
+          <span className="dashboard-kpi-icon">◫</span>
+          <span>Agendamentos</span>
+          <strong>{todayAppointments.length}</strong>
+          <small>Confirmados hoje</small>
+        </article>
+        <article className="dashboard-kpi">
+          <span className="dashboard-kpi-icon">◷</span>
+          <span>Horários disponíveis</span>
+          <strong>{freeLabel}</strong>
+          <small>Livre no expediente</small>
+        </article>
+        <article className="dashboard-kpi">
+          <span className="dashboard-kpi-icon">↗</span>
+          <span>Faturamento</span>
+          <strong>{money(todayRevenue)}</strong>
+          <small>Recebido hoje</small>
+        </article>
+      </div>
+
+      <section className="dashboard-card">
+        <div className="dashboard-card-head">
+          <div>
+            <p className="eyebrow">AGENDA</p>
+            <h3>Atendimentos de hoje</h3>
+          </div>
+          <button className="dashboard-chip" type="button" onClick={onAgenda}>Ver agenda</button>
+        </div>
+        {todayAppointments.length ? <div className="dashboard-agenda-list">
+          {todayAppointments.slice(0, 5).map(a => <button className="dashboard-agenda-row" type="button" key={a.id} onClick={onAgenda}>
+            <strong>{a.time}</strong>
+            <span>{a.service}</span>
+            <span className="dashboard-client">{a.name}</span>
+            <span className="dashboard-status">Agendado</span>
+          </button>)}
+        </div> : <div className="calendar-empty">Sua agenda está livre hoje.<p>Os atendimentos do dia aparecerão aqui.</p></div>}
+      </section>
+
+      <section className="dashboard-card dashboard-finance">
+        <div className="dashboard-card-head">
+          <div>
+            <p className="eyebrow">RESUMO FINANCEIRO</p>
+            <h3>Financeiro de hoje</h3>
+          </div>
+          <span className="dashboard-chip">Hoje</span>
+        </div>
+        <div className="dashboard-finance-message">◎ <strong>Financeiro saudável hoje.</strong></div>
+        <div className="dashboard-finance-grid">
+          <div><span>Entrou</span><strong>{money(todayRevenue)}</strong></div>
+          <div><span>Saiu</span><strong>{money(0)}</strong></div>
+          <div><span>Resultado</span><strong>{money(todayRevenue)}</strong></div>
+        </div>
+      </section>
+
+      <section className="dashboard-card dashboard-month">
+        <div className="dashboard-card-head">
+          <div>
+            <p className="eyebrow">VISÃO DO MÊS</p>
+            <h3>Desempenho acumulado</h3>
+          </div>
+        </div>
+        <div className="dashboard-month-grid">
+          <div><span>Reservas</span><strong>{demo ? demoMonth.count : month.length}</strong></div>
+          <div><span>Valor previsto</span><strong>{money(demo ? demoMonth.total : month.reduce((n, a) => n + a.price, 0))}</strong></div>
+          <div><span>Próximos</span><strong>{next.length}</strong></div>
+        </div>
+      </section>
+    </section>;
 }
 
 export default function AdminCalendar({ data, date, onSelect }: { data: Calendar; date: string; onSelect: (date: string) => void }) {
