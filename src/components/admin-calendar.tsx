@@ -479,7 +479,7 @@ export function AgendaWorkspace({
 
         {mode === 'day' && <div className={dragFeedback ? "agenda-drag-feedback is-visible" : "agenda-drag-feedback"}>
             <span>↕</span>
-            <p>{dragFeedback || 'Segure o nome do cliente e arraste para mudar o horário.'}</p>
+            <p>{dragFeedback || 'PC: arraste o nome do cliente. Celular: segure o nome por um instante e arraste.'}</p>
         </div>}
 
         {mode === 'day' && <div className="agenda-timeline-shell">
